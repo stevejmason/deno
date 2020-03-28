@@ -62,16 +62,16 @@ export function connect(args: ConnectRequest): Promise<ConnectResponse> {
   return sendAsync("op_connect", args);
 }
 
-interface ReceiveResponse {
+interface ReceiveResponse<A extends Addr> {
   size: number;
-  remoteAddr: Addr;
+  remoteAddr: A;
 }
 
-export function receive(
+export function receive<A extends Addr>(
   rid: number,
   transport: string,
   zeroCopy: Uint8Array
-): Promise<ReceiveResponse> {
+): Promise<ReceiveResponse<A>> {
   return sendAsync("op_receive", { rid, transport }, zeroCopy);
 }
 
