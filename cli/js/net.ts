@@ -4,19 +4,19 @@ import { EOF, Reader, Writer, Closer } from "./io.ts";
 import { read, write } from "./ops/io.ts";
 import { close } from "./ops/resources.ts";
 import * as netOps from "./ops/net.ts";
-import { Addr } from "./ops/net.ts";
+import { NetAddr, UnixAddr, Addr } from "./ops/net.ts";
 export { ShutdownMode, shutdown, NetAddr, UnixAddr } from "./ops/net.ts";
 
-export interface DatagramConn extends AsyncIterable<[Uint8Array, Addr]> {
-  receive(p?: Uint8Array): Promise<[Uint8Array, Addr]>;
+export interface DatagramConn<A extends Addr> extends AsyncIterable<[Uint8Array, A]> {
+  receive(p?: Uint8Array): Promise<[Uint8Array, A]>;
 
-  send(p: Uint8Array, addr: Addr): Promise<void>;
+  send(p: Uint8Array, addr: A): Promise<void>;
 
   close(): void;
 
-  addr: Addr;
+  addr: A;
 
-  [Symbol.asyncIterator](): AsyncIterator<[Uint8Array, Addr]>;
+  [Symbol.asyncIterator](): AsyncIterator<[Uint8Array, A]>;
 }
 
 export interface Listener extends AsyncIterable<Conn> {
@@ -83,16 +83,16 @@ export class ListenerImpl implements Listener {
   }
 }
 
-export class DatagramImpl implements DatagramConn {
+export class DatagramImpl<A extends Addr> implements DatagramConn<A> {
   constructor(
     readonly rid: number,
-    readonly addr: Addr,
+    readonly addr: A,
     public bufSize: number = 1024
   ) {}
 
-  async receive(p?: Uint8Array): Promise<[Uint8Array, Addr]> {
+  async receive(p?: Uint8Array): Promise<[Uint8Array, A]> {
     const buf = p || new Uint8Array(this.bufSize);
-    const { size, remoteAddr } = await netOps.receive(
+    const { size, remoteAddr } = await netOps.receive<A>(
       this.rid,
       this.addr.transport,
       buf
@@ -101,7 +101,7 @@ export class DatagramImpl implements DatagramConn {
     return [sub, remoteAddr];
   }
 
-  async send(p: Uint8Array, addr: Addr): Promise<void> {
+  async send(p: Uint8Array, addr: A): Promise<void> {
     const remote = { hostname: "127.0.0.1", transport: "udp", ...addr };
 
     const args = { ...remote, rid: this.rid };
@@ -112,7 +112,7 @@ export class DatagramImpl implements DatagramConn {
     close(this.rid);
   }
 
-  async *[Symbol.asyncIterator](): AsyncIterator<[Uint8Array, Addr]> {
+  async *[Symbol.asyncIterator](): AsyncIterator<[Uint8Array, A]> {
     while (true) {
       try {
         yield await this.receive();
@@ -153,13 +153,13 @@ export function listen(
 ): Listener;
 export function listen(
   options: ListenOptions & { transport: "udp" }
-): DatagramConn;
+): DatagramConn<NetAddr>;
 export function listen(
   options: UnixListenOptions & { transport: "unixpacket" }
-): DatagramConn;
+): DatagramConn<UnixAddr>;
 export function listen(
   options: ListenOptions | UnixListenOptions
-): Listener | DatagramConn {
+): Listener | DatagramConn<Addr> {
   let res;
 
   if (options.transport === "unix" || options.transport === "unixpacket") {

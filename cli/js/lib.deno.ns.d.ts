@@ -1622,23 +1622,23 @@ declare namespace Deno {
   /** **UNSTABLE**: new API, yet to be vetted.
    *
    * A generic transport listener for message-oriented protocols. */
-  export interface DatagramConn extends AsyncIterable<[Uint8Array, Addr]> {
+  export interface DatagramConn<A extends Addr> extends AsyncIterable<[Uint8Array, A]> {
     /** **UNSTABLE**: new API, yet to be vetted.
      *
      * Waits for and resolves to the next message to the `UDPConn`. */
-    receive(p?: Uint8Array): Promise<[Uint8Array, Addr]>;
+    receive(p?: Uint8Array): Promise<[Uint8Array, A]>;
     /** UNSTABLE: new API, yet to be vetted.
      *
      * Sends a message to the target. */
-    send(p: Uint8Array, addr: Addr): Promise<void>;
+    send(p: Uint8Array, addr: A): Promise<void>;
     /** UNSTABLE: new API, yet to be vetted.
      *
      * Close closes the socket. Any pending message promises will be rejected
      * with errors. */
     close(): void;
     /** Return the address of the `UDPConn`. */
-    readonly addr: Addr;
-    [Symbol.asyncIterator](): AsyncIterator<[Uint8Array, Addr]>;
+    readonly addr: A;
+    [Symbol.asyncIterator](): AsyncIterator<[Uint8Array, A]>;
   }
 
   /** A generic network listener for stream-oriented protocols. */
@@ -1714,7 +1714,7 @@ declare namespace Deno {
    * Requires `allow-net` permission. */
   export function listen(
     options: ListenOptions & { transport: "udp" }
-  ): DatagramConn;
+  ): DatagramConn<NetAddr>;
   /** **UNSTABLE**: new API
    *
    * Listen announces on the local transport address.
@@ -1724,7 +1724,7 @@ declare namespace Deno {
    * Requires `allow-read` permission. */
   export function listen(
     options: UnixListenOptions & { transport: "unixpacket" }
-  ): DatagramConn;
+  ): DatagramConn<UnixAddr>;
 
   export interface ListenTLSOptions extends ListenOptions {
     /** Server certificate file. */

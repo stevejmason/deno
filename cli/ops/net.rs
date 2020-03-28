@@ -20,6 +20,9 @@ use tokio::net::UdpSocket;
 
 #[cfg(unix)]
 use super::net_unix;
+use tokio::net::udp::{SendHalf, RecvHalf};
+use tokio::sync::Mutex;
+use std::sync::Arc;
 
 pub fn init(i: &mut Isolate, s: &State) {
   i.register_op("op_accept", s.stateful_json_op(op_accept));
@@ -134,23 +137,19 @@ fn receive_udp(
   zero_copy: Option<ZeroCopyBuf>,
 ) -> Result<JsonOp, OpError> {
   let mut buf = zero_copy.unwrap();
-
-  let rid = args.rid as u32;
-
   let state_ = state.clone();
+  let resource_table = &state_.borrow().resource_table;
+  let resource = resource_table
+    .get::<UdpSocketResource>(args.rid as u32)
+    .ok_or_else(|| {
+      OpError::bad_resource("Socket has been closed".to_string())
+    })?;
+  let recv = resource.recv.clone();
 
   let op = async move {
-    let receive_fut = poll_fn(|cx| {
-      let resource_table = &mut state_.borrow_mut().resource_table;
-      let resource = resource_table
-        .get_mut::<UdpSocketResource>(rid)
-        .ok_or_else(|| {
-          OpError::bad_resource("Socket has been closed".to_string())
-        })?;
-      let socket = &mut resource.socket;
-      socket.poll_recv_from(cx, &mut buf).map_err(OpError::from)
-    });
-    let (size, remote_addr) = receive_fut.await?;
+    let mut recv = recv.lock().await;
+    let (size, remote_addr) = recv.recv_from(&mut buf).await?;
+
     Ok(json!({
       "size": size,
       "remoteAddr": {
@@ -208,17 +207,19 @@ fn op_send(
     } if transport == "udp" => {
       state.check_net(&args.hostname, args.port)?;
 
+      let state_ = state.clone();
+      let resource_table = &state_.borrow().resource_table;
+      let resource = resource_table
+        .get::<UdpSocketResource>(rid as u32)
+        .ok_or_else(|| {
+          OpError::bad_resource("Socket has been closed".to_string())
+        })?;
+      let send = resource.send.clone();
+
       let op = async move {
-        let mut state = state_.borrow_mut();
-        let resource = state
-          .resource_table
-          .get_mut::<UdpSocketResource>(rid as u32)
-          .ok_or_else(|| {
-            OpError::bad_resource("Socket has been closed".to_string())
-          })?;
-        let socket = &mut resource.socket;
         let addr = resolve_addr(&args.hostname, args.port).await?;
-        socket.send_to(&buf, addr).await?;
+        let mut send = send.lock().await;
+        send.send_to(&buf, &addr).await?;
         Ok(json!({}))
       };
 
@@ -433,7 +434,8 @@ impl TcpListenerResource {
 }
 
 struct UdpSocketResource {
-  socket: UdpSocket,
+  send: Arc<Mutex<SendHalf>>,
+  recv: Arc<Mutex<RecvHalf>>,
 }
 
 #[derive(Deserialize)]
@@ -483,7 +485,11 @@ fn listen_udp(
   let mut state = state.borrow_mut();
   let socket = futures::executor::block_on(UdpSocket::bind(&addr))?;
   let local_addr = socket.local_addr()?;
-  let socket_resource = UdpSocketResource { socket };
+  let (recv, send) = socket.split();
+  let socket_resource = UdpSocketResource {
+    send: Arc::new(Mutex::new(send)),
+    recv: Arc::new(Mutex::new(recv)),
+  };
   let rid = state
     .resource_table
     .add("udpSocket", Box::new(socket_resource));
